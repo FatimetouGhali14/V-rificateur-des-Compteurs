@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 
 function readExcel(file) {
   return new Promise((resolve, reject) => {
@@ -52,21 +52,43 @@ function applyHeaderStyle(ws, range, rgb) {
       fill: { fgColor: { rgb } },
       font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
       alignment: { horizontal: "center", vertical: "center" },
-      border: { bottom: { style: "thin", color: { rgb: "FFFFFF" } }, right: { style: "thin", color: { rgb: "FFFFFF" } } },
+      border: { 
+        bottom: { style: "medium", color: { rgb: "FFFFFF" } },
+        right: { style: "thin", color: { rgb: "FFFFFF" } } 
+      },
     };
   }
 }
 
-function applyRowStyles(ws, range, evenRgb) {
+function applyRowStyles(ws, range, evenRgb, statusColor, lightStatusColor) {
   for (let r = 1; r <= range.e.r; r++) {
     for (let c = range.s.c; c <= range.e.c; c++) {
       const addr = XLSX.utils.encode_cell({ r, c });
       if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+      
+      const isEven = r % 2 === 0;
       ws[addr].s = {
-        fill: { fgColor: { rgb: r % 2 === 0 ? evenRgb : "FFFFFF" } },
-        font: { sz: 10 },
-        alignment: { vertical: "center" },
+        fill: { fgColor: { rgb: isEven ? evenRgb : "FFFFFF" } },
+        font: { sz: 10, color: { rgb: "334155" } },
+        alignment: { vertical: "center", horizontal: "left" },
+        border: {
+          bottom: { style: "thin", color: { rgb: "F1F5F9" } }
+        }
       };
+
+      // Style spécifique pour la colonne STATUT (index 0)
+      if (c === 0) {
+        ws[addr].s.fill = { fgColor: { rgb: lightStatusColor } };
+        ws[addr].s.font = { bold: true, color: { rgb: statusColor }, sz: 10 };
+        ws[addr].s.alignment = { horizontal: "center", vertical: "center" };
+      }
+
+      // Style pour les colonnes Compteur (en gras)
+      const headerName = String(ws[XLSX.utils.encode_cell({ r: 0, c })]?.v || "").toUpperCase();
+      if (headerName.includes("COMPTEUR")) {
+        ws[addr].s.font.bold = true;
+        ws[addr].s.font.color = { rgb: "1E293B" };
+      }
     }
   }
 }
@@ -76,28 +98,28 @@ function exportToExcel(result, fileInName) {
 
   // ── Feuille ACTIFS (vert) ──
   const actifRows = result.actifs.map((row) => {
-    const out = {};
+    const out = { "STATUT": "ACTIF" };
     Object.keys(row).filter((k) => k !== "_refData").forEach((k) => { out[k] = norm(row[k]); });
     if (row._refData) Object.keys(row._refData).forEach((k) => { out["REF_" + k] = norm(row._refData[k]); });
     return out;
   });
   const wsActif = XLSX.utils.json_to_sheet(actifRows.length ? actifRows : [{}]);
   const rActif = XLSX.utils.decode_range(wsActif["!ref"] || "A1:A1");
-  applyHeaderStyle(wsActif, rActif, "1A7A4A");
-  applyRowStyles(wsActif, rActif, "F0FDF4");
+  applyHeaderStyle(wsActif, rActif, "10B981"); // Vert SNDE/UI
+  applyRowStyles(wsActif, rActif, "F0FDF4", "047857", "D1FAE5");
   wsActif["!cols"] = Object.keys(actifRows[0] || {}).map((k) => ({ wch: Math.max(k.length + 2, 14) }));
   XLSX.utils.book_append_sheet(wb, wsActif, "Actifs");
 
   // ── Feuille INACTIFS (rouge) ──
   const inactifRows = result.inactifs.map((row) => {
-    const out = {};
+    const out = { "STATUT": "INACTIF" };
     Object.keys(row).forEach((k) => { out[k] = norm(row[k]); });
     return out;
   });
   const wsInactif = XLSX.utils.json_to_sheet(inactifRows.length ? inactifRows : [{}]);
   const rInactif = XLSX.utils.decode_range(wsInactif["!ref"] || "A1:A1");
-  applyHeaderStyle(wsInactif, rInactif, "C0392B");
-  applyRowStyles(wsInactif, rInactif, "FEF2F2");
+  applyHeaderStyle(wsInactif, rInactif, "EF4444"); // Rouge UI
+  applyRowStyles(wsInactif, rInactif, "FEF2F2", "B91C1C", "FEE2E2");
   wsInactif["!cols"] = Object.keys(inactifRows[0] || {}).map((k) => ({ wch: Math.max(k.length + 2, 14) }));
   XLSX.utils.book_append_sheet(wb, wsInactif, "Inactifs");
 
@@ -106,7 +128,7 @@ function exportToExcel(result, fileInName) {
   const total = result.actifs.length + result.inactifs.length;
   const taux  = Math.round((result.actifs.length / (total || 1)) * 100);
   const resumeData = [
-    ["Rapport de croisement — SNDE", ""],
+    ["RAPPORT DE CROISEMENT — SNDE", ""],
     ["Date d'export", today],
     ["Fichier vérifié", fileInName || "—"],
     ["", ""],
@@ -118,16 +140,39 @@ function exportToExcel(result, fileInName) {
     ["Abonnés dans la référence", result.totalRef],
   ];
   const wsR = XLSX.utils.aoa_to_sheet(resumeData);
-  if (wsR["A1"]) wsR["A1"].s = { font: { bold: true, sz: 14, color: { rgb: "1E3A5F" } }, fill: { fgColor: { rgb: "EBF5FB" } } };
-  ["A5","B5"].forEach((a) => { if (wsR[a]) wsR[a].s = { fill: { fgColor: { rgb: "1E3A5F" } }, font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 } }; });
-  const rowColors = { 6:"EBF5FB", 7:"D5F5E3", 8:"FADBD8", 9:"FEF9E7", 10:"EBF5FB" };
+  
+  // Style Titre Résumé
+  if (wsR["A1"]) wsR["A1"].s = { 
+    font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } }, 
+    fill: { fgColor: { rgb: "1E3A5F" } },
+    alignment: { horizontal: "center", vertical: "center" }
+  };
+  
+  // Style Header Indicateurs
+  ["A5","B5"].forEach((a) => { 
+    if (wsR[a]) wsR[a].s = { 
+      fill: { fgColor: { rgb: "1E3A5F" } }, 
+      font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: { bottom: { style: "thin", color: { rgb: "FFFFFF" } } }
+    }; 
+  });
+
+  const rowColors = { 6:"F8FAFC", 7:"D1FAE5", 8:"FEE2E2", 9:"FEF9E7", 10:"F0F9FF" };
   Object.entries(rowColors).forEach(([row, rgb]) => {
     ["A","B"].forEach((col) => {
       const a = col + row;
-      if (wsR[a]) wsR[a].s = { fill: { fgColor: { rgb } }, font: { sz: 11 } };
+      if (wsR[a]) {
+        wsR[a].s = { 
+          fill: { fgColor: { rgb } }, 
+          font: { sz: 11, color: { rgb: "1E293B" } },
+          border: { bottom: { style: "thin", color: { rgb: "E2E8F0" } } }
+        };
+      }
     });
   });
-  wsR["!cols"] = [{ wch: 32 }, { wch: 20 }];
+
+  wsR["!cols"] = [{ wch: 35 }, { wch: 25 }];
   wsR["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
   XLSX.utils.book_append_sheet(wb, wsR, "Résumé");
 
