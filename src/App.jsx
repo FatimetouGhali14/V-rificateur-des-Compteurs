@@ -292,7 +292,7 @@ export default function App() {
           <h2 style={{fontSize:14,fontWeight:800,color:"#1e293b",margin:"0 0 16px"}}>1 — Charger les fichiers</h2>
           <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
             <DropZone label="Fichier référence (Etat_AbnActif)" sublabel="Glissez ou cliquez · .xlsx / .xls" onFile={loadRef} file={fileRef} accent="#0ea5e9" />
-            <DropZone label="Fichier à vérifier (Mellah, etc.)" sublabel="Glissez ou cliquez · .xlsx / .xls" onFile={loadIn}  file={fileIn}  accent="#8b5cf6" />
+            <DropZone label="Fichier à vérifier (fichier de prélèvement)" sublabel="Glissez ou cliquez · .xlsx / .xls" onFile={loadIn}  file={fileIn}  accent="#8b5cf6" />
           </div>
         </div>
 
