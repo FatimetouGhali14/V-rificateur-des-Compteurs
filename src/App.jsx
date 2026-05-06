@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
-import XLSX from "xlsx-js-style";
+import * as XLSX from "xlsx";
 
 function readExcel(file) {
   return new Promise((resolve, reject) => {
@@ -43,15 +43,6 @@ function guessCompteurCol(cols) {
   return cols.find((col) => norm(col).toUpperCase().includes("COMPTEUR")) || cols[0];
 }
 
-function guessCentreCol(cols) {
-  const candidates = ["CENTRE", "ZONE", "NOM CENTRE", "S/CENTRE", "CENTRE_DISTRIBUTION"];
-  for (const c of candidates) {
-    const found = cols.find((col) => norm(col).toUpperCase() === c.toUpperCase());
-    if (found) return found;
-  }
-  return cols.find((col) => norm(col).toUpperCase().includes("CENTRE")) || null;
-}
-
 // ── Export Excel avec couleurs ────────────────────────────────────────────────
 function applyHeaderStyle(ws, range, rgb) {
   for (let c = range.s.c; c <= range.e.c; c++) {
@@ -61,7 +52,7 @@ function applyHeaderStyle(ws, range, rgb) {
       fill: { fgColor: { rgb } },
       font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 },
       alignment: { horizontal: "center", vertical: "center" },
-      border: { top: {style:"thin", color:{rgb:"FFFFFF"}}, bottom: { style: "thin", color: { rgb: "FFFFFF" } }, left:{style:"thin", color:{rgb:"FFFFFF"}}, right: { style: "thin", color: { rgb: "FFFFFF" } } },
+      border: { bottom: { style: "thin", color: { rgb: "FFFFFF" } }, right: { style: "thin", color: { rgb: "FFFFFF" } } },
     };
   }
 }
@@ -75,7 +66,6 @@ function applyRowStyles(ws, range, evenRgb) {
         fill: { fgColor: { rgb: r % 2 === 0 ? evenRgb : "FFFFFF" } },
         font: { sz: 10 },
         alignment: { vertical: "center" },
-        border: { bottom: { style: "thin", color: { rgb: "EEEEEE" } } }
       };
     }
   }
@@ -93,7 +83,7 @@ function exportToExcel(result, fileInName) {
   });
   const wsActif = XLSX.utils.json_to_sheet(actifRows.length ? actifRows : [{}]);
   const rActif = XLSX.utils.decode_range(wsActif["!ref"] || "A1:A1");
-  applyHeaderStyle(wsActif, rActif, "16A34A"); // Vert SNDE
+  applyHeaderStyle(wsActif, rActif, "1A7A4A");
   applyRowStyles(wsActif, rActif, "F0FDF4");
   wsActif["!cols"] = Object.keys(actifRows[0] || {}).map((k) => ({ wch: Math.max(k.length + 2, 14) }));
   XLSX.utils.book_append_sheet(wb, wsActif, "Actifs");
@@ -106,79 +96,39 @@ function exportToExcel(result, fileInName) {
   });
   const wsInactif = XLSX.utils.json_to_sheet(inactifRows.length ? inactifRows : [{}]);
   const rInactif = XLSX.utils.decode_range(wsInactif["!ref"] || "A1:A1");
-  applyHeaderStyle(wsInactif, rInactif, "DC2626"); // Rouge
+  applyHeaderStyle(wsInactif, rInactif, "C0392B");
   applyRowStyles(wsInactif, rInactif, "FEF2F2");
   wsInactif["!cols"] = Object.keys(inactifRows[0] || {}).map((k) => ({ wch: Math.max(k.length + 2, 14) }));
   XLSX.utils.book_append_sheet(wb, wsInactif, "Inactifs");
 
-  // ── Feuille RÉSUMÉ (Style Dashboard Photo) ──
+  // ── Feuille RÉSUMÉ ──
   const today = new Date().toLocaleDateString("fr-FR");
   const total = result.actifs.length + result.inactifs.length;
-  
-  // Analyse par centre si possible
-  const sample = result.actifs[0] || result.inactifs[0] || {};
-  const centreCol = guessCentreCol(Object.keys(sample).filter(k => k !== "_refData"));
-  
-  let resumeData = [];
-  resumeData.push(["RAPPORT DE VÉRIFICATION DES COMPTEURS — SNDE", ""]);
-  resumeData.push(["Date d'exportation", today]);
-  resumeData.push(["Fichier source", fileInName || "—"]);
-  resumeData.push(["", ""]);
-
-  if (centreCol) {
-    const statsByCentre = {};
-    [...result.actifs, ...result.inactifs].forEach(row => {
-      const c = norm(row[centreCol]) || "SANS CENTRE";
-      if (!statsByCentre[c]) statsByCentre[c] = { total: 0, actifs: 0, inactifs: 0 };
-      statsByCentre[c].total++;
-      if (result.actifs.includes(row)) statsByCentre[c].actifs++;
-      else statsByCentre[c].inactifs++;
-    });
-
-    resumeData.push(["Centre (SNDE)", "Total Compteurs", "Actifs (Trouvés)", "Inactifs (Non Trouvés)", "Taux %"]);
-    Object.entries(statsByCentre).forEach(([name, s]) => {
-      resumeData.push([name, s.total, s.actifs, s.inactifs, Math.round((s.actifs/s.total)*100) + "%"]);
-    });
-    resumeData.push(["TOTAL GÉNÉRAL SNDE", total, result.actifs.length, result.inactifs.length, Math.round((result.actifs.length/(total||1))*100) + "%"]);
-  } else {
-    resumeData.push(["INDICATEUR", "VALEUR"]);
-    resumeData.push(["Total compteurs vérifiés", total]);
-    resumeData.push(["Compteurs ACTIFS", result.actifs.length]);
-    resumeData.push(["Compteurs INACTIFS", result.inactifs.length]);
-    resumeData.push(["Taux d'activation", Math.round((result.actifs.length/(total||1))*100) + "%"]);
-    resumeData.push(["Abonnés dans la référence", result.totalRef]);
-  }
-
+  const taux  = Math.round((result.actifs.length / (total || 1)) * 100);
+  const resumeData = [
+    ["Rapport de croisement — SNDE", ""],
+    ["Date d'export", today],
+    ["Fichier vérifié", fileInName || "—"],
+    ["", ""],
+    ["INDICATEUR", "VALEUR"],
+    ["Total compteurs vérifiés", total],
+    ["Compteurs ACTIFS", result.actifs.length],
+    ["Compteurs INACTIFS", result.inactifs.length],
+    ["Taux d'activation", taux + "%"],
+    ["Abonnés dans la référence", result.totalRef],
+  ];
   const wsR = XLSX.utils.aoa_to_sheet(resumeData);
-  const rR = XLSX.utils.decode_range(wsR["!ref"] || "A1:A1");
-
-  // Style Titre Principal
-  wsR["A1"].s = { font: { bold: true, sz: 14, color: { rgb: "FFFFFF" } }, fill: { fgColor: { rgb: "1E3A8A" } }, alignment: { horizontal: "center" } };
-  wsR["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: centreCol ? 4 : 1 } }];
-
-  // Trouver la ligne d'en-tête du tableau (celle qui contient "Centre" ou "INDICATEUR")
-  const headerIdx = resumeData.findIndex(row => row[0] === (centreCol ? "Centre (SNDE)" : "INDICATEUR"));
-  if (headerIdx !== -1) {
-    for (let c = 0; c <= (centreCol ? 4 : 1); c++) {
-      const addr = XLSX.utils.encode_cell({ r: headerIdx, c });
-      if (wsR[addr]) wsR[addr].s = { fill: { fgColor: { rgb: "2563EB" } }, font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 }, alignment: { horizontal: "center" }, border: { bottom: {style:"thin", color:{rgb:"FFFFFF"}} } };
-    }
-    // Style des lignes de données
-    for (let r = headerIdx + 1; r < rR.e.r; r++) {
-      for (let c = 0; c <= (centreCol ? 4 : 1); c++) {
-        const addr = XLSX.utils.encode_cell({ r, c });
-        if (wsR[addr]) wsR[addr].s = { fill: { fgColor: { rgb: r % 2 === 0 ? "F1F5F9" : "FFFFFF" } }, font: { sz: 10 }, border: { bottom: {style:"thin", color:{rgb:"CBD5E1"}} } };
-      }
-    }
-    // Style de la ligne Total
-    const totalRowIdx = rR.e.r;
-    for (let c = 0; c <= (centreCol ? 4 : 1); c++) {
-      const addr = XLSX.utils.encode_cell({ r: totalRowIdx, c });
-      if (wsR[addr]) wsR[addr].s = { fill: { fgColor: { rgb: "DBEAFE" } }, font: { bold: true, color: { rgb: "1E3A8A" }, sz: 11 }, border: { top: {style:"thin", color:{rgb:"2563EB"}} } };
-    }
-  }
-
-  wsR["!cols"] = centreCol ? [{ wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 18 }, { wch: 10 }] : [{ wch: 32 }, { wch: 20 }];
+  if (wsR["A1"]) wsR["A1"].s = { font: { bold: true, sz: 14, color: { rgb: "1E3A5F" } }, fill: { fgColor: { rgb: "EBF5FB" } } };
+  ["A5","B5"].forEach((a) => { if (wsR[a]) wsR[a].s = { fill: { fgColor: { rgb: "1E3A5F" } }, font: { bold: true, color: { rgb: "FFFFFF" }, sz: 11 } }; });
+  const rowColors = { 6:"EBF5FB", 7:"D5F5E3", 8:"FADBD8", 9:"FEF9E7", 10:"EBF5FB" };
+  Object.entries(rowColors).forEach(([row, rgb]) => {
+    ["A","B"].forEach((col) => {
+      const a = col + row;
+      if (wsR[a]) wsR[a].s = { fill: { fgColor: { rgb } }, font: { sz: 11 } };
+    });
+  });
+  wsR["!cols"] = [{ wch: 32 }, { wch: 20 }];
+  wsR["!merges"] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }];
   XLSX.utils.book_append_sheet(wb, wsR, "Résumé");
 
   const baseName = fileInName?.replace(/\.[^.]+$/, "") || "resultat";
@@ -297,7 +247,7 @@ export default function App() {
           <h2 style={{fontSize:14,fontWeight:800,color:"#1e293b",margin:"0 0 16px"}}>1 — Charger les fichiers</h2>
           <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
             <DropZone label="Fichier référence (Etat_AbnActif)" sublabel="Glissez ou cliquez · .xlsx / .xls" onFile={loadRef} file={fileRef} accent="#0ea5e9" />
-            <DropZone label="Fichier à vérifier (fichier de prélèvement)" sublabel="Glissez ou cliquez · .xlsx / .xls" onFile={loadIn}  file={fileIn}  accent="#8b5cf6" />
+            <DropZone label="Fichier à vérifier (Mellah, etc.)" sublabel="Glissez ou cliquez · .xlsx / .xls" onFile={loadIn}  file={fileIn}  accent="#8b5cf6" />
           </div>
         </div>
 
